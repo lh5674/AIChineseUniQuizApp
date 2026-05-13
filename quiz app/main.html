@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 全能刷题系统</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; padding: 40px; color: #333; }
+        .box { max-width: 900px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h1 { text-align: center; color: #2d3748; }
+        
+        #drop-zone { border: 3px dashed #cbd5e0; padding: 50px; text-align: center; color: #718096; cursor: pointer; border-radius: 10px; transition: 0.3s; font-size: 1.1em; }
+        #drop-zone:hover { border-color: #4299e1; background: #ebf8ff; color: #2b6cb0; }
+        
+        .q-card { background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; margin: 15px 0; border-radius: 8px; }
+        textarea { width: 100%; margin-top: 10px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 10px; font-family: inherit; resize: vertical; box-sizing: border-box;}
+        
+        /* 填空题专用输入框样式 */
+        .fill-input { width: 100%; margin-top: 10px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 10px; font-family: inherit; box-sizing: border-box; font-size: 1em; }
+        
+        input[type="file"] { margin-top: 10px; font-size: 0.9em; }
+        
+        .btn { background: #48bb78; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 16px; margin-top: 20px; font-weight: bold; transition: background 0.2s; }
+        .btn:hover { background: #38a169; }
+        .btn:disabled { background: #a0aec0; cursor: not-allowed; }
+        
+        .feedback { color: #2d3748; font-size: 0.95em; background: #fff5f5; padding: 15px; margin-top: 15px; border-left: 4px solid #f56565; border-radius: 0 4px 4px 0; line-height: 1.5; }
+        
+        /* 隐藏的解析框样式 */
+        .analysis-box { display: none; padding: 10px 15px; background: #edf2f7; border-radius: 6px; margin-top: 12px; border-left: 3px solid #3182ce; font-size: 0.95em; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🎓 AI 考前突击助手</h1>
+        
+        <div id="drop-zone">拖拽复习资料 (PDF / Word / PPT / TXT) 到这里出题</div>
+        <div id="loading" style="display:none; text-align: center; margin: 20px; font-weight: bold; color: #3182ce;">🚀 AI 正在阅读资料并命题，请稍候...</div>
+
+        <div id="exam-area" style="display:none;">
+            <h2 id="title" style="text-align: center; border-bottom: 2px solid #edf2f7; padding-bottom: 10px;"></h2>
+            <div id="quiz-container"></div>
+            <button class="btn" onclick="submitExam()" id="submit-btn">交卷并查看批改结果</button>
+        </div>
+    </div>
+
+    <script>
+        const API = "http://127.0.0.1:8000";
+        let currentExam = null; 
+
+        const dz = document.getElementById('drop-zone');
+        dz.ondragover = e => { e.preventDefault(); dz.style.background = "#ebf8ff"; };
+        dz.ondragleave = e => { dz.style.background = "transparent"; };
+        dz.ondrop = async e => {
+            e.preventDefault();
+            dz.style.background = "transparent";
+            const files = e.dataTransfer.files;
+            if(files.length === 0) return;
+
+            const fd = new FormData();
+            for(let f of files) fd.append('files', f);
+
+            document.getElementById('loading').style.display = 'block';
+            dz.style.display = 'none';
+            document.getElementById('exam-area').style.display = 'none';
+
+            try {
+                const res = await fetch(`${API}/upload-exam`, { method: 'POST', body: fd });
+                if(!res.ok) throw new Error(`错误码 ${res.status}`);
+                
+                currentExam = await res.json();
+                renderExam(currentExam);
+            } catch (err) { 
+                console.error(err);
+                alert("出题失败！请确保后端服务器正在运行。"); 
+                dz.style.display = 'block';
+            } finally { 
+                document.getElementById('loading').style.display = 'none'; 
+            }
+        };
+
+        function renderExam(data) {
+            document.getElementById('exam-area').style.display = 'block';
+            document.getElementById('title').innerText = data.subject || "模拟期末考试";
+            let html = "";
+            
+            // 渲染选择题
+            if(data.choices && data.choices.length > 0) {
+                html += "<h3>一、选择题</h3>";
+                data.choices.forEach((q, i) => {
+                    const txt = q.q || q.question || "题目加载失败";
+                    html += `<div class="q-card">
+                        <b>${i+1}. ${txt}</b><br>
+                        ${(q.options || []).map(o => `<label style="display:block; margin: 8px 0;"><input type="radio" name="c${i}" value="${o[0]}"> ${o}</label>`).join('')}
+                        <div id="ans_c_${i}" class="analysis-box">
+                            <span style="color:#e53e3e; font-weight:bold;">正确答案：${q.answer || "略"}</span><br>
+                            <b>解析：</b>${q.analysis || "无详细解析"}
+                        </div>
+                    </div>`;
+                });
+            }
+
+            // 渲染填空题 (加入文本输入框)
+            if(data.fills && data.fills.length > 0) {
+                html += "<h3>二、填空题</h3>";
+                data.fills.forEach((q, i) => {
+                    const txt = q.q || q.question || "题目加载失败";
+                    html += `<div class="q-card">
+                        <b>${i+1}. ${txt}</b><br>
+                        <input type="text" id="fill_${i}" class="fill-input" placeholder="请输入你的答案...">
+                        <div id="ans_f_${i}" class="analysis-box">
+                            <span style="color:#e53e3e; font-weight:bold;">正确答案：${q.answer || "略"}</span><br>
+                            <b>解析：</b>${q.analysis || "无详细解析"}
+                        </div>
+                    </div>`;
+                });
+            }
+
+            // 渲染主观题
+            if(data.calcs && data.calcs.length > 0) {
+                html += "<h3>三、主观题 (由 AI 批改)</h3>";
+                html += "<p style='color:#718096; font-size:0.9em;'>💡 你可以直接输入文字作答，也可以在纸上写好后拍照上传。</p>";
+                data.calcs.forEach((q, i) => {
+                    const txt = q.q || q.question || "题目加载失败";
+                    html += `<div class="q-card">
+                        <b>${i+1}. ${txt}</b><br>
+                        <textarea id="ans_${i}" rows="3" placeholder="在此输入你的解答过程或思路..."></textarea>
+                        <input type="file" id="img_${i}" accept="image/png, image/jpeg, image/jpg" title="上传草稿照片">
+                        <div id="fb_a_${i}"></div>
+                    </div>`;
+                });
+            }
+            
+            document.getElementById('quiz-container').innerHTML = html;
+        }
+
+        const fileToBase64 = (file) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+
+        async function submitExam() {
+            if(!currentExam) return;
+            
+            const btn = document.getElementById('submit-btn');
+            btn.innerText = "⏳ 正在交卷并等待 AI 批改...";
+            btn.disabled = true;
+
+            // --- 核心改动：交卷后，显示客观题的正确答案 ---
+            if (currentExam.choices) {
+                currentExam.choices.forEach((_, i) => {
+                    const ansDiv = document.getElementById(`ans_c_${i}`);
+                    if (ansDiv) ansDiv.style.display = 'block'; // 取消隐藏
+                });
+            }
+            if (currentExam.fills) {
+                currentExam.fills.forEach((_, i) => {
+                    const ansDiv = document.getElementById(`ans_f_${i}`);
+                    if (ansDiv) ansDiv.style.display = 'block'; // 取消隐藏
+                });
+            }
+
+            // --- 收集主观题数据，发给后端批改 ---
+            const items = [];
+            if (currentExam.calcs) {
+                for(let i = 0; i < currentExam.calcs.length; i++) {
+                    const q = currentExam.calcs[i];
+                    const userBox = document.getElementById(`ans_${i}`);
+                    const imgInput = document.getElementById(`img_${i}`);
+                    
+                    const userText = userBox ? userBox.value.trim() : "";
+                    let b64 = null;
+                    
+                    if (imgInput && imgInput.files.length > 0) {
+                        try { b64 = await fileToBase64(imgInput.files[0]); } 
+                        catch (e) { console.error(e); }
+                    }
+
+                    items.push({
+                        id: `a_${i}`,
+                        question: q.q || q.question || "未知题目",
+                        correct_answer: q.answer || q.analysis || "暂无标答",
+                        max_score: 20,
+                        user_text: userText || (b64 ? "已上传图片草稿" : "未作答"),
+                        user_image_base64: b64
+                    });
+                }
+            }
+
+            // 如果没有计算题，直接提示交卷成功并结束
+            if (items.length === 0) {
+                alert("交卷成功！请对照下方显示的答案自行核对。");
+                btn.innerText = "已交卷";
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API}/grade-subjective`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ items })
+                });
+                
+                if(!res.ok) throw new Error(`错误码 ${res.status}`);
+
+                const result = await res.json();
+                result.results.forEach(r => {
+                    const fbDiv = document.getElementById(`fb_${r.id}`);
+                    if(fbDiv) {
+                        fbDiv.innerHTML = `<div class="feedback">
+                            <b style="color:#e53e3e; font-size:1.1em;">AI 判分: ${r.score} 分</b><br><br>
+                            ${r.feedback.replace(/\n/g, '<br>')}
+                        </div>`;
+                    }
+                });
+                
+                alert("交卷完成！请下拉查看各题答案与 AI 批改结果。");
+            } catch (err) { 
+                console.error("批改通信失败:", err);
+                alert("AI 批改失败，但已显示标准答案，请自行核对。"); 
+            } finally {
+                btn.innerText = "重新提交批改";
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
