@@ -12,7 +12,7 @@ app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # --- 配置区 ---
-QWEN_API_KEY = "sk-8e0d06785260433393ef04f45937c505"
+QWEN_API_KEY = ""
 client = OpenAI(api_key=QWEN_API_KEY, base_url="https://dashscope.aliyuncs.com/compatible-mode/v1")
 
 # --- 数据模型升级：支持图片 ---
